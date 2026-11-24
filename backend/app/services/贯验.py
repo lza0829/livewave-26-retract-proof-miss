@@ -73,6 +73,54 @@ def 跑贯验() -> dict:
             if not ev or ev["点赞增量"] != d["增赞"] or ev["送礼额"] != d["增送"]:
                 问题.append(f"撤回单编号{d['编号']}增量与触发事件{d['事件编号']}不符")
 
+
+        from app.modules import 先撤回证明 as 证
+
+        缺证明 = conn.execute(
+            """SELECT d.窗键, d.事件编号
+               FROM 撤回单 d
+               LEFT JOIN 先撤回证明 p ON p.窗键=d.窗键 AND p.事件编号=d.事件编号
+               WHERE d.原因='迟到修正' AND d.事件编号!='' AND p.编号 IS NULL"""
+        ).fetchall()
+        for r in 缺证明:
+            问题.append(f"撤回缺先撤回证明: 窗{r['窗键']}事件{r['事件编号']}（命中成功而证明空）")
+
+        孤证明 = conn.execute(
+            """SELECT p.窗键, p.事件编号, p.证明号
+               FROM 先撤回证明 p
+               LEFT JOIN 撤回单 d
+                 ON d.窗键=p.窗键 AND d.事件编号=p.事件编号 AND d.原因='迟到修正'
+               WHERE d.编号 IS NULL"""
+        ).fetchall()
+        for r in 孤证明:
+            问题.append(f"证明号{r['证明号']}无对应撤回行: 窗{r['窗键']}事件{r['事件编号']}（证明号与撤回簿分叉）")
+
+        双证明 = conn.execute(
+            """SELECT 窗键, 事件编号, COUNT(*) AS c
+               FROM 先撤回证明 GROUP BY 窗键, 事件编号 HAVING c > 1"""
+        ).fetchall()
+        for r in 双证明:
+            问题.append(f"证明锚点重复: 窗{r['窗键']}事件{r['事件编号']}有{r['c']}条证明（应≤1）")
+
+        for d in conn.execute(
+            """SELECT d.*, p.首撤哈希, p.证明号
+               FROM 撤回单 d
+               JOIN 先撤回证明 p ON p.窗键=d.窗键 AND p.事件编号=d.事件编号
+               WHERE d.原因='迟到修正' AND d.事件编号!=''"""
+        ).fetchall():
+            望哈希, 望号 = 证.排证明(d["窗键"], d["事件编号"], d["旧点赞"], d["新点赞"], d["旧送礼"], d["新送礼"])
+            if d["首撤哈希"] != 望哈希 or d["证明号"] != 望号:
+                问题.append(f"证明号{d['证明号']}与撤回簿重算不符（应{望号}）")
+
+        证号分叉 = conn.execute(
+            """SELECT a.锚点键, a.证明号 AS 审计号, p.证明号 AS 证明号
+               FROM 撤回幂等审计 a
+               JOIN 先撤回证明 p ON p.窗键=a.窗键 AND p.事件编号=a.事件编号
+               WHERE a.证明号 != p.证明号"""
+        ).fetchall()
+        for r in 证号分叉:
+            问题.append(f"命中审计{r['锚点键']}证明号{r['审计号']}与证明表{r['证明号']}不符")
+
         通过 = 1 if not 问题 else 0
         说明 = "窗输出与事件/撤回互证通过" if 通过 else "；".join(问题)[:800]
         conn.execute(

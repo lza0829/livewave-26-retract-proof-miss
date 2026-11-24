@@ -19,6 +19,7 @@ def 总览() -> dict:
             "开启窗": c("SELECT COUNT(*) FROM 热度窗 WHERE 状态='开启'"),
             "已关闭窗": c("SELECT COUNT(*) FROM 热度窗 WHERE 状态='已关闭'"),
             "撤回单": c("SELECT COUNT(*) FROM 撤回单"),
+            "先撤回证明": c("SELECT COUNT(*) FROM 先撤回证明"),
             "旁路匣": c("SELECT COUNT(*) FROM 旁路匣"),
             "装载批次": c("SELECT COUNT(*) FROM 装载批次"),
             "末次贯验": dict(末) if 末 else None,

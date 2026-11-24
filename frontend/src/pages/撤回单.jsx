@@ -53,7 +53,7 @@ export default function 撤回单页() {
             <thead>
               <tr>
                 <th>锚点口径</th><th>valid</th><th>是否二次</th><th>幂等命中</th>
-                <th>事件行</th><th>撤回行</th><th>窗合计（赞/送/笔）</th>
+                <th>事件行</th><th>撤回行</th><th>证明号</th><th>窗合计（赞/送/笔）</th>
               </tr>
             </thead>
             <tbody>
@@ -68,6 +68,7 @@ export default function 撤回单页() {
                 <td>{果.幂等命中}</td>
                 <td>{果.事件行数}</td>
                 <td>{果.撤回行数}</td>
+                <td className="码">{果.证明号 || "—"}</td>
                 <td className="码">
                   {果.合计 ? `${果.合计.点赞} / ${果.合计.送礼} / ${果.合计.笔数}` : "—"}
                 </td>
@@ -89,7 +90,7 @@ export default function 撤回单页() {
             <thead>
               <tr>
                 <th>编号</th><th>窗键</th><th>原因</th><th>点赞旧→新</th><th>送礼旧→新</th>
-                <th>触发事件</th><th>幂等命中</th><th>处理时</th>
+                <th>触发事件</th><th>证明号</th><th>幂等命中</th><th>处理时</th>
               </tr>
             </thead>
             <tbody>
@@ -98,6 +99,7 @@ export default function 撤回单页() {
                   <td>{r.编号}</td><td className="码">{r.窗键}</td><td>{r.原因}</td>
                   <td>{r.旧点赞} → {r.新点赞}</td><td>{r.旧送礼} → {r.新送礼}</td>
                   <td>{r.事件编号}</td>
+                  <td className="码">{r.证明号 || "—"}</td>
                   <td>
                     <span className={`徽章 ${r.幂等命中 > 1 ? "败" : "通"}`}>{r.幂等命中}</span>
                   </td>

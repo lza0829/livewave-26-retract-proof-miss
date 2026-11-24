@@ -93,10 +93,13 @@ def 列撤回():
     conn = 连接()
     try:
         rows = conn.execute(
-            """SELECT d.*, COALESCE(a.命中次数, 0) AS 幂等命中
+            """SELECT d.*, COALESCE(a.命中次数, 0) AS 幂等命中,
+                      COALESCE(p.证明号, '') AS 证明号
                FROM 撤回单 d
                LEFT JOIN 撤回幂等审计 a
                  ON a.锚点键 = d.窗键||'|'||d.事件编号
+               LEFT JOIN 先撤回证明 p
+                 ON p.窗键 = d.窗键 AND p.事件编号 = d.事件编号
                ORDER BY d.编号 DESC LIMIT 100"""
         )
         return [dict(r) for r in rows]
@@ -185,9 +188,16 @@ from app.modules import 先撤回证明 as 证
 
 @路由.get("/核证/先撤回证明")
 def 取先撤回证明(事件编号: str | None = None):
+    """先撤回证明核证只读接口（乙：证明号换审计行）。
+
+    纯读，不开写事务、不落副作用。四方对账：先撤回证明 ↔ 撤回簿 ↔ 命中审计 ↔ 热度窗/事件。
+    """
     conn = 连接()
     try:
-        return 证.查证明(conn, 事件编号)
+        果 = 证.查证明(conn, 事件编号)
+        if 事件编号 and not 果["found"] and not 果["事件行数"]:
+            raise HTTPException(404, f"无此事件的证明/撤回/事件记录:{事件编号}")
+        return 果
     finally:
         conn.close()
 

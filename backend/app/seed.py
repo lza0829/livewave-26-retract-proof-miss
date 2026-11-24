@@ -81,7 +81,8 @@ CREATE TABLE IF NOT EXISTS 撤回幂等审计 (
   首次处理时 TEXT NOT NULL,
   命中次数 INTEGER NOT NULL DEFAULT 1,
   末次处理时 TEXT NOT NULL,
-  末次批次编号 TEXT NOT NULL DEFAULT ''
+  末次批次编号 TEXT NOT NULL DEFAULT '',
+  证明号 TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS 旁路匣 (
   编号 INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -147,7 +148,7 @@ def _幂等迁移(conn) -> None:
            GROUP BY 窗键, 事件编号"""
     )
 
-    
+
     conn.execute(
         """CREATE UNIQUE INDEX IF NOT EXISTS 撤回单_幂等锚点
            ON 撤回单(窗键, 事件编号)
@@ -155,10 +156,72 @@ def _幂等迁移(conn) -> None:
     )
 
 
+def _加列(conn, 表: str, 列: str, 定义: str) -> None:
+    if 列 not in [r[1] for r in conn.execute(f"PRAGMA table_info({表})")]:
+        conn.execute(f"ALTER TABLE {表} ADD COLUMN {列} {定义}")
+
+
+def _证明迁移(conn) -> None:
+    """先撤回证明（乙：证明号换审计行）一次性自愈 + 硬约束。
+
+    顺序：审计表加证明号列 → 清重复证明 → 按撤回簿回填证明（旧库「命中成功而证明空」自愈）
+    → 回填审计证明号 → 最后才建唯一索引（保证建索引时已无违反行）。
+    """
+    from app.modules import 先撤回证明 as 证
+
+    _加列(conn, "撤回幂等审计", "证明号", "TEXT NOT NULL DEFAULT ''")
+
+
+    重复 = conn.execute(
+        """SELECT 窗键, 事件编号, MIN(编号) AS 留
+           FROM 先撤回证明
+           GROUP BY 窗键, 事件编号
+           HAVING COUNT(*) > 1"""
+    ).fetchall()
+    for r in 重复:
+        conn.execute(
+            "DELETE FROM 先撤回证明 WHERE 窗键=? AND 事件编号=? AND 编号>?",
+            (r["窗键"], r["事件编号"], r["留"]),
+        )
+
+
+    for d in conn.execute(
+        "SELECT * FROM 撤回单 WHERE 原因='迟到修正' AND 事件编号!=''"
+    ).fetchall():
+        哈希, 号 = 证.排证明(d["窗键"], d["事件编号"], d["旧点赞"], d["新点赞"], d["旧送礼"], d["新送礼"])
+        conn.execute(
+            """INSERT OR IGNORE INTO 先撤回证明(事件编号, 窗键, 首撤哈希, 证明号, 时刻)
+               VALUES (?,?,?,?,?)""",
+            (d["事件编号"], d["窗键"], 哈希, 号, d["处理时"]),
+        )
+
+
+    conn.execute(
+        """UPDATE 撤回幂等审计
+           SET 证明号 = (SELECT p.证明号 FROM 先撤回证明 p
+                         WHERE p.窗键=撤回幂等审计.窗键 AND p.事件编号=撤回幂等审计.事件编号)
+           WHERE 证明号='' AND EXISTS (
+               SELECT 1 FROM 先撤回证明 p
+               WHERE p.窗键=撤回幂等审计.窗键 AND p.事件编号=撤回幂等审计.事件编号)"""
+    )
+
+
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS 先撤回证明_锚点 ON 先撤回证明(窗键, 事件编号)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS 先撤回证明_证明号 ON 先撤回证明(证明号) WHERE 证明号!=''"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS 撤回幂等审计_证明号 ON 撤回幂等审计(证明号) WHERE 证明号!=''"
+    )
+
+
 def 初始化库() -> None:
     conn = 连接()
     conn.executescript(建表)
     _幂等迁移(conn)
+    _证明迁移(conn)
     if conn.execute("SELECT COUNT(*) AS c FROM 站规").fetchone()["c"] == 0:
         for k, v in {
             "站名": "播浪",
